@@ -23,6 +23,7 @@
 #ifndef __GST_PROGRESS_REPORT_H__
 #define __GST_PROGRESS_REPORT_H__
 
+#include <glib/gstdio.h>
 #include <gst/base/gstbasetransform.h>
 
 G_BEGIN_DECLS
@@ -54,6 +55,11 @@ struct _GstProgressReport
   /* Format used for querying. Using a string here because the
    * format might not be registered yet when the property is set */
   gchar *format;
+
+  /* Path of output file */
+  gchar *outfile;
+  /* File stream for outfile */
+  FILE *outfile_stream;
 };
 
 struct _GstProgressReportClass

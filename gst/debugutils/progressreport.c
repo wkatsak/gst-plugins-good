@@ -82,7 +82,8 @@ enum
   ARG_UPDATE_FREQ,
   ARG_SILENT,
   ARG_DO_QUERY,
-  ARG_FORMAT
+  ARG_FORMAT,
+  ARG_OUTFILE,
 };
 
 GstStaticPadTemplate progress_report_src_template =
@@ -101,6 +102,7 @@ GST_STATIC_PAD_TEMPLATE ("sink",
 #define DEFAULT_SILENT       FALSE
 #define DEFAULT_DO_QUERY     TRUE
 #define DEFAULT_FORMAT       "auto"
+#define DEFAULT_OUTFILE      "stdout"
 
 static void gst_progress_report_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec);
@@ -125,6 +127,11 @@ gst_progress_report_finalize (GObject * obj)
 
   g_free (filter->format);
   filter->format = NULL;
+
+  g_free (filter->outfile);
+  filter->outfile = NULL;
+  if (filter->outfile_stream)
+    fclose(filter->outfile_stream);
 
   G_OBJECT_CLASS (parent_class)->finalize (obj);
 }
@@ -165,6 +172,11 @@ gst_progress_report_class_init (GstProgressReportClass * g_class)
           "Format to use for the querying", DEFAULT_FORMAT,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
+  g_object_class_install_property (gobject_class,
+      ARG_OUTFILE, g_param_spec_string ("outfile", "outfile",
+          "File to use for output", DEFAULT_OUTFILE,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
   gst_element_class_add_pad_template (element_class,
       gst_static_pad_template_get (&progress_report_sink_template));
   gst_element_class_add_pad_template (element_class,
@@ -192,6 +204,8 @@ gst_progress_report_init (GstProgressReport * report)
   report->silent = DEFAULT_SILENT;
   report->do_query = DEFAULT_DO_QUERY;
   report->format = g_strdup (DEFAULT_FORMAT);
+  report->outfile = g_strdup (DEFAULT_OUTFILE);
+  report->outfile_stream = NULL;
 }
 
 static void
@@ -308,12 +322,21 @@ gst_progress_report_do_query (GstProgressReport * filter, GstFormat format,
 
   if (!filter->silent) {
     if (total > 0) {
-      g_print ("%s (%02d:%02d:%02d): %" G_GINT64_FORMAT " / %"
-          G_GINT64_FORMAT " %s (%4.1f %%)\n", GST_OBJECT_NAME (filter), hh,
-          mm, ss, cur, total, format_name, (gdouble) cur / total * 100.0);
+      if (!filter->outfile_stream)
+        g_print ("%s (%02d:%02d:%02d): %" G_GINT64_FORMAT " / %"
+            G_GINT64_FORMAT " %s (%4.1f %%)\n", GST_OBJECT_NAME (filter), hh,
+            mm, ss, cur, total, format_name, (gdouble) cur / total * 100.0);
+      else
+        g_fprintf (filter->outfile_stream, "%s (%02d:%02d:%02d): %" G_GINT64_FORMAT " / %"
+            G_GINT64_FORMAT " %s (%4.1f %%)\n", GST_OBJECT_NAME (filter), hh,
+            mm, ss, cur, total, format_name, (gdouble) cur / total * 100.0);
     } else {
-      g_print ("%s (%02d:%02d:%02d): %" G_GINT64_FORMAT " %s\n",
-          GST_OBJECT_NAME (filter), hh, mm, ss, cur, format_name);
+      if (!filter->outfile_stream)
+        g_print ("%s (%02d:%02d:%02d): %" G_GINT64_FORMAT " %s\n",
+            GST_OBJECT_NAME (filter), hh, mm, ss, cur, format_name);
+      else
+        g_fprintf (filter->outfile_stream, "%s (%02d:%02d:%02d): %" G_GINT64_FORMAT " %s\n",
+            GST_OBJECT_NAME (filter), hh, mm, ss, cur, format_name);
     }
   }
 
@@ -475,6 +498,22 @@ gst_progress_report_set_property (GObject * object, guint prop_id,
         filter->format = g_strdup ("auto");
       GST_OBJECT_UNLOCK (filter);
       break;
+    case ARG_OUTFILE:
+      GST_OBJECT_LOCK(filter);
+      g_free (filter->outfile);
+      filter->outfile = g_value_dup_string (value);
+      if (filter->outfile == NULL) {
+        filter->outfile = g_strdup("stdout");
+        filter->outfile_stream = NULL;
+      }
+      else {
+        filter->outfile_stream = g_fopen(filter->outfile, "w");
+        if (!filter->outfile_stream) {
+          g_print("Error opening file %s\n", filter->outfile);
+        }
+      }
+      GST_OBJECT_UNLOCK(filter);
+      break;
     default:
       break;
   }
@@ -507,6 +546,11 @@ gst_progress_report_get_property (GObject * object, guint prop_id,
     case ARG_FORMAT:
       GST_OBJECT_LOCK (filter);
       g_value_set_string (value, filter->format);
+      GST_OBJECT_UNLOCK (filter);
+      break;
+    case ARG_OUTFILE:
+      GST_OBJECT_LOCK (filter);
+      g_value_set_string (value, filter->outfile);
       GST_OBJECT_UNLOCK (filter);
       break;
     default:
