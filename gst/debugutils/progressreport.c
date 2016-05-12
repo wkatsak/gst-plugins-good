@@ -72,6 +72,7 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#include <sys/time.h>
 
 #include "progressreport.h"
 
@@ -98,7 +99,7 @@ GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_ALWAYS,
     GST_STATIC_CAPS_ANY);
 
-#define DEFAULT_UPDATE_FREQ  5
+#define DEFAULT_UPDATE_FREQ  10
 #define DEFAULT_SILENT       FALSE
 #define DEFAULT_DO_QUERY     TRUE
 #define DEFAULT_FORMAT       "auto"
@@ -153,8 +154,9 @@ gst_progress_report_class_init (GstProgressReportClass * g_class)
 
   g_object_class_install_property (gobject_class,
       ARG_UPDATE_FREQ, g_param_spec_int ("update-freq", "Update Frequency",
-          "Number of seconds between reports when data is flowing", 1, G_MAXINT,
-          DEFAULT_UPDATE_FREQ, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+          "Number of milliseconds between reports when data is flowing", 1,
+          G_MAXINT, DEFAULT_UPDATE_FREQ,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   g_object_class_install_property (gobject_class,
       ARG_SILENT, g_param_spec_boolean ("silent",
@@ -240,12 +242,29 @@ gst_progress_report_post_progress (GstProgressReport * filter,
 }
 
 static gboolean
+gst_progress_report_do_percent_report (gdouble percentage)
+{
+  static int done[10] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+  int i = 0;
+
+  for (i = 0; i < 10; i++) {
+    if (done[i] == 0 && percentage >= ((i + 1) * 10.0)) {
+      done[i] = 1;
+      return TRUE;
+    }
+  }
+
+  return FALSE;
+}
+
+static gboolean
 gst_progress_report_do_query (GstProgressReport * filter, GstFormat format,
-    gint hh, gint mm, gint ss, GstBuffer * buf)
+    gint hh, gint mm, gint ss, gint ms, GstBuffer * buf)
 {
   const gchar *format_name = NULL;
   GstPad *sink_pad;
-  gint64 cur, total;
+  gint64 cur, total, total_ms;
+  gdouble percentage_complete = 0.0;
 
   sink_pad = GST_BASE_TRANSFORM (filter)->sinkpad;
 
@@ -320,30 +339,42 @@ gst_progress_report_do_query (GstProgressReport * filter, GstFormat format,
     }
   }
 
-  if (!filter->silent) {
+  percentage_complete = (gdouble) cur / total * 100.0;
+  total_ms = hh * 60 * 60 * 1000;
+  total_ms += mm * 60 * 1000;
+  total_ms += ss * 1000;
+  total_ms += ms;
+
+  if (!filter->silent
+      && gst_progress_report_do_percent_report (percentage_complete)) {
     if (total > 0) {
-      if (!filter->outfile_stream)
-        g_print ("%s (%02d:%02d:%02d): %" G_GINT64_FORMAT " / %"
+      if (!filter->outfile_stream) {
+        g_print ("%s %d (%02d:%02d:%02d.%03d): %" G_GINT64_FORMAT " / %"
             G_GINT64_FORMAT " %s (%4.1f %%) prediction=%0.2f s\n",
-            GST_OBJECT_NAME (filter), hh, mm, ss, cur, total, format_name,
-            (gdouble) cur / total * 100.0,
+            GST_OBJECT_NAME (filter), total_ms, hh, mm, ss, ms, cur, total,
+            format_name, percentage_complete,
             ((gdouble) total * (hh * 60.0 * 60.0 + mm * 60.0 +
                     ss)) / (gdouble) cur);
-      else
+      } else {
         g_fprintf (filter->outfile_stream,
-            "%s (%02d:%02d:%02d): %" G_GINT64_FORMAT " / %" G_GINT64_FORMAT
-            " %s (%4.1f %%) prediction=%0.2f s\n", GST_OBJECT_NAME (filter), hh,
-            mm, ss, cur, total, format_name, (gdouble) cur / total * 100.0,
+            "%s %d (%02d:%02d:%02d.%03d): %" G_GINT64_FORMAT " / %"
+            G_GINT64_FORMAT " %s (%4.1f %%) prediction=%0.2f s\n",
+            GST_OBJECT_NAME (filter), total_ms, hh, mm, ss, ms, cur, total,
+            format_name, percentage_complete,
             ((gdouble) total * (hh * 60.0 * 60.0 + mm * 60.0 +
                     ss)) / (gdouble) cur);
+        fflush (filter->outfile_stream);
+      }
     } else {
-      if (!filter->outfile_stream)
-        g_print ("%s (%02d:%02d:%02d): %" G_GINT64_FORMAT " %s\n",
-            GST_OBJECT_NAME (filter), hh, mm, ss, cur, format_name);
-      else
+      if (!filter->outfile_stream) {
+        g_print ("%s (%02d:%02d:%02d.%03d): %" G_GINT64_FORMAT " %s\n",
+            GST_OBJECT_NAME (filter), hh, mm, ss, ms, cur, format_name);
+      } else {
         g_fprintf (filter->outfile_stream,
-            "%s (%02d:%02d:%02d): %" G_GINT64_FORMAT " %s\n",
-            GST_OBJECT_NAME (filter), hh, mm, ss, cur, format_name);
+            "%s (%02d:%02d:%02d.%03d): %" G_GINT64_FORMAT " %s\n",
+            GST_OBJECT_NAME (filter), hh, mm, ss, ms, cur, format_name);
+        fflush (filter->outfile_stream);
+      }
     }
   }
 
@@ -363,13 +394,16 @@ gst_progress_report_report (GstProgressReport * filter, GTimeVal cur_time,
   GstFormat format = GST_FORMAT_UNDEFINED;
   gboolean done = FALSE;
   glong run_time;
-  gint hh, mm, ss;
+  gint hh, mm, ss, ms;
+  GTimeVal time_diff;
 
-  run_time = cur_time.tv_sec - filter->start_time.tv_sec;
+  timersub (&cur_time, &filter->start_time, &time_diff);
+  run_time = time_diff.tv_sec;
 
   hh = (run_time / 3600) % 100;
   mm = (run_time / 60) % 60;
   ss = (run_time % 60);
+  ms = (time_diff.tv_usec / 1000);
 
   GST_OBJECT_LOCK (filter);
 
@@ -378,13 +412,13 @@ gst_progress_report_report (GstProgressReport * filter, GTimeVal cur_time,
   }
 
   if (format != GST_FORMAT_UNDEFINED) {
-    done = gst_progress_report_do_query (filter, format, hh, mm, ss, buf);
+    done = gst_progress_report_do_query (filter, format, hh, mm, ss, ms, buf);
   } else {
     gint i;
 
     for (i = 0; i < G_N_ELEMENTS (try_formats); ++i) {
       done = gst_progress_report_do_query (filter, try_formats[i], hh, mm, ss,
-          buf);
+          ms, buf);
       if (done)
         break;
     }
@@ -431,16 +465,21 @@ gst_progress_report_transform_ip (GstBaseTransform * trans, GstBuffer * buf)
 {
   GstProgressReport *filter;
   gboolean need_update;
-  GTimeVal cur_time;
+  GTimeVal cur_time, time_diff;
+  gint time_diff_ms;
 
   g_get_current_time (&cur_time);
 
   filter = GST_PROGRESS_REPORT (trans);
 
-  /* Check if update_freq seconds have passed since the last update */
+  /* Check if update_freq milliseconds have passed since the last update */
+
   GST_OBJECT_LOCK (filter);
-  need_update =
-      ((cur_time.tv_sec - filter->last_report.tv_sec) >= filter->update_freq);
+
+  timersub (&cur_time, &filter->last_report, &time_diff);
+  time_diff_ms = ((time_diff.tv_sec % 60) * 1000) + (time_diff.tv_usec / 1000);
+  need_update = time_diff_ms >= filter->update_freq;
+
   GST_OBJECT_UNLOCK (filter);
 
   if (need_update) {
