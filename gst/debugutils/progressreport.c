@@ -131,7 +131,7 @@ gst_progress_report_finalize (GObject * obj)
   g_free (filter->outfile);
   filter->outfile = NULL;
   if (filter->outfile_stream)
-    fclose(filter->outfile_stream);
+    fclose (filter->outfile_stream);
 
   G_OBJECT_CLASS (parent_class)->finalize (obj);
 }
@@ -327,15 +327,17 @@ gst_progress_report_do_query (GstProgressReport * filter, GstFormat format,
             G_GINT64_FORMAT " %s (%4.1f %%)\n", GST_OBJECT_NAME (filter), hh,
             mm, ss, cur, total, format_name, (gdouble) cur / total * 100.0);
       else
-        g_fprintf (filter->outfile_stream, "%s (%02d:%02d:%02d): %" G_GINT64_FORMAT " / %"
-            G_GINT64_FORMAT " %s (%4.1f %%)\n", GST_OBJECT_NAME (filter), hh,
-            mm, ss, cur, total, format_name, (gdouble) cur / total * 100.0);
+        g_fprintf (filter->outfile_stream,
+            "%s (%02d:%02d:%02d): %" G_GINT64_FORMAT " / %" G_GINT64_FORMAT
+            " %s (%4.1f %%)\n", GST_OBJECT_NAME (filter), hh, mm, ss, cur,
+            total, format_name, (gdouble) cur / total * 100.0);
     } else {
       if (!filter->outfile_stream)
         g_print ("%s (%02d:%02d:%02d): %" G_GINT64_FORMAT " %s\n",
             GST_OBJECT_NAME (filter), hh, mm, ss, cur, format_name);
       else
-        g_fprintf (filter->outfile_stream, "%s (%02d:%02d:%02d): %" G_GINT64_FORMAT " %s\n",
+        g_fprintf (filter->outfile_stream,
+            "%s (%02d:%02d:%02d): %" G_GINT64_FORMAT " %s\n",
             GST_OBJECT_NAME (filter), hh, mm, ss, cur, format_name);
     }
   }
@@ -499,20 +501,19 @@ gst_progress_report_set_property (GObject * object, guint prop_id,
       GST_OBJECT_UNLOCK (filter);
       break;
     case ARG_OUTFILE:
-      GST_OBJECT_LOCK(filter);
+      GST_OBJECT_LOCK (filter);
       g_free (filter->outfile);
       filter->outfile = g_value_dup_string (value);
       if (filter->outfile == NULL) {
-        filter->outfile = g_strdup("stdout");
+        filter->outfile = g_strdup ("stdout");
         filter->outfile_stream = NULL;
-      }
-      else {
-        filter->outfile_stream = g_fopen(filter->outfile, "w");
+      } else {
+        filter->outfile_stream = g_fopen (filter->outfile, "w");
         if (!filter->outfile_stream) {
-          g_print("Error opening file %s\n", filter->outfile);
+          g_print ("Error opening file %s\n", filter->outfile);
         }
       }
-      GST_OBJECT_UNLOCK(filter);
+      GST_OBJECT_UNLOCK (filter);
       break;
     default:
       break;
