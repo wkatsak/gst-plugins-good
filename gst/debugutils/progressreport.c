@@ -242,10 +242,13 @@ gst_progress_report_post_progress (GstProgressReport * filter,
 }
 
 static gboolean
-gst_progress_report_do_percent_report (gdouble percentage)
+gst_progress_report_do_percent_report (GstProgressReport * filter,
+    gdouble percentage)
 {
   static int done[10] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
   int i = 0;
+
+  GST_LOG_OBJECT (filter, "current percentage %0.2f", percentage);
 
   for (i = 0; i < 10; i++) {
     if (done[i] == 0 && percentage >= ((i + 1) * 10.0)) {
@@ -346,7 +349,7 @@ gst_progress_report_do_query (GstProgressReport * filter, GstFormat format,
   total_ms += ms;
 
   if (!filter->silent
-      && gst_progress_report_do_percent_report (percentage_complete)) {
+      && gst_progress_report_do_percent_report (filter, percentage_complete)) {
     if (total > 0) {
       if (!filter->outfile_stream) {
         g_print ("%s %d (%02d:%02d:%02d.%03d): %" G_GINT64_FORMAT " / %"
@@ -509,6 +512,7 @@ static gboolean
 gst_progress_report_stop (GstBaseTransform * trans)
 {
   /* anything we should be doing here? */
+
   return TRUE;
 }
 
